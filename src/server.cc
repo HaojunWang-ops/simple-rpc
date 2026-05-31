@@ -52,6 +52,7 @@ public:
     {
         std::cout << "UserServiceImpl::Register called\n";
         std::cout << "name = " << request->name() << "\n";
+        //如果endl，内容很可能在缓冲区，输出不出来
         std::cout << "password= " << request->password() << std::endl;
 
         if (request->name().empty()){
