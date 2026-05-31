@@ -100,32 +100,64 @@ void MyRpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
         return;
     }
 
-    uint32_t net_responce_size = 0;
-    if (!ReadN(fd, &net_responce_size, sizeof(net_responce_size)))
-    {
-        if (controller){
-            controller->SetFailed("read responce size failed");
-        }
-        ::close(fd);
-        return;
+   uint32_t net_response_header_size = 0;
+   if (!ReadN(fd, &net_response_header_size, sizeof(net_response_header_size)))
+   {
+    if (controller){
+        controller->SetFailed("read response_header_size failed");
     }
+    ::close(fd);
+    return;
+   } 
 
-    uint32_t responce_size = ::ntohl(net_responce_size);
-    std::string responce_str(responce_size, '\0');
-    //std::cout << responce_size << "\n";
+   uint32_t response_header_size = ::ntohl(net_response_header_size);
 
-    if (!ReadN(fd, responce_str.data(), responce_size))
-    {
-        if (controller){
-            controller->SetFailed("read responce body failed");
-        }
-        ::close(fd);
-        return;
+   std::string response_header_str(response_header_size, '\0');
+
+   if (!ReadN(fd, response_header_str.data(), response_header_size))
+   {
+    if (controller){
+        controller->SetFailed("read response header failed");
     }
+    ::close(fd);
+    return;
+   }
 
-    if (!response->ParseFromString(responce_str)){
+   rpc::ResponseRpcHeader response_header;
+
+   if (!response_header.ParseFromString(response_header_str)){
+    if (controller){
+        controller->SetFailed("parse response header failed");
+    }
+    ::close(fd);
+    return;
+   }
+
+   if (response_header.error_code() != 0)
+   {
+    if (controller)
+    {
+        controller->SetFailed(response_header.error_text());
+    }
+    ::close(fd);
+    return;
+   }
+
+   uint32_t response_size = response_header.response_size();
+
+   std::string response_str(response_size, '\0');
+
+   if (!ReadN(fd, response_str.data(), response_size)){
+    if (controller){
+        controller->SetFailed("read response failed");
+    }
+    ::close(fd);
+    return;
+   }
+
+    if (!response->ParseFromString(response_str)){
         if (controller){
-            controller->SetFailed("parse responce failed");
+            controller->SetFailed("parse response body failed");
         }
         ::close(fd);
         return;
@@ -137,5 +169,3 @@ void MyRpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
 
     ::close(fd);
 }
-
-

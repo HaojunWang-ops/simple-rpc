@@ -5,6 +5,8 @@
 #include <google/protobuf/service.h>
 #include <string.h>
 #include <unistd.h>
+#include <iostream>
+#include <iomanip>
 
 inline bool ReadN(int fd, void* buf, size_t n)
 {
@@ -58,6 +60,22 @@ inline bool WriteN(int fd, void* buf, size_t n)
         }
     }
     return true;
+}
+
+//将二进制字符串以可读十六进制格式打印出来
+inline void PrintHex(const std::string& name, const std::string& s)
+{
+    std::cout << name << " size= " << s.size() << " hex= ";
+
+    for (unsigned char c : s){
+        std::cout << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<int> (c)
+                  <<" ";
+    }
+
+    std::cout << std::dec << "\n";
 }
 
 class SimpleRpcController : public google::protobuf::RpcController {

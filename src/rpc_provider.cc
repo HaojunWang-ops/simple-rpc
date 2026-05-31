@@ -12,34 +12,73 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static bool SendRpcResponse(int connfd, int error_code, const std::string &error_text, const google::protobuf::Message *response)
+{
+    std::string response_body;
 
-class SendResponceClosure : public google::protobuf::Closure
+    if (error_code == 0 && response != nullptr)
+    {
+        if (!response->SerializeToString(&response_body))
+        {
+            return false;
+        }
+    }
+
+    rpc::ResponseRpcHeader response_header;
+    response_header.set_error_code(error_code);
+    response_header.set_error_text(error_text);
+    response_header.set_response_size(static_cast<uint32_t>(response_body.size()));
+
+    std::string response_header_str;
+
+    if (!response_header.SerializeToString(&response_header_str))
+    {
+        return false;
+    }
+
+    uint32_t response_header_size = static_cast<uint32_t>(response_header_str.size());
+    uint32_t net_response_header_size = ::htonl(response_header_size);
+
+    if (!WriteN(connfd, &net_response_header_size, sizeof(net_response_header_size)) || !WriteN(connfd, response_header_str.data(), response_header_size) || !WriteN(connfd, response_body.data(), response_body.size()))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+static void SendRpcError(int connfd, int error_code, const std::string &error_text)
+{
+    SendRpcResponse(connfd, error_code, error_text, nullptr);
+}
+
+class SendResponseClosure : public google::protobuf::Closure
 {
 public:
-    SendResponceClosure(int connfd, google::protobuf::Message *request, google::protobuf::Message *response)
+    SendResponseClosure(int connfd, SimpleRpcController *controller, google::protobuf::Message *request, google::protobuf::Message *response)
         : connfd_(connfd),
+          controller_(controller),
           request_(request),
           response_(response)
     {
     }
 
-    //回调处理，负责发送response
+    // 回调处理，负责发送response
     void Run() override
     {
-        std::string response_str;
-        if (!response_->SerializeToString(&response_str))
+        //业务方法执行了，业务失败
+        if (controller_ && controller_->Failed())
         {
-            std::cerr << "response SerializeToString failed" << std::endl;
+            SendRpcResponse(connfd_, 2001, controller_->ErrorText(), nullptr);
         }
+        //业务成功执行，返回reponse
         else
         {
-
-            uint32_t response_size = static_cast<uint32_t>(response_str.size());
-            uint32_t net_response_size = ::htonl(response_size);
-
-            WriteN(connfd_, &net_response_size, sizeof(net_response_size));
-            WriteN(connfd_, response_str.data(), response_str.size());
+            SendRpcResponse(connfd_, 0, "", response_);
         }
+
+        // request / response / controller / closure 都由 SendResponseClosure::Run() 释放
+        delete controller_;
         delete request_;
         delete response_;
         delete this;
@@ -47,35 +86,46 @@ public:
 
 private:
     int connfd_;
+    SimpleRpcController *controller_;
     google::protobuf::Message *request_;
     google::protobuf::Message *response_;
 };
 
-//将service注册
-void RpcProvider::NotifyService(google::protobuf::Service* service)
+// 将service注册
+void RpcProvider::NotifyService(google::protobuf::Service *service)
 {
-    const google::protobuf::ServiceDescriptor* service_desc = service->GetDescriptor();
+    const google::protobuf::ServiceDescriptor *service_desc = service->GetDescriptor();
 
     struct ServiceInfo service_info;
     service_info.service = service;
 
     for (int i = 0; i < service_desc->method_count(); i++)
     {
-        const google::protobuf::MethodDescriptor* method = service_desc->method(i);
+        const google::protobuf::MethodDescriptor *method = service_desc->method(i);
         service_info.methods.emplace(method->name(), method);
     }
 
-    std::string service_name = service_desc->full_name();
-    services_.emplace(service_name, std::move(service_info)); //move is useful?
+    std::string service_name = service_desc->full_name();    
+    
+    /*
+    for (const auto& pair : service_info.methods)
+    {
+        std::cout << pair.first << " ";
+    }
+    std::cout << "\n";
+    */
+    
+    services_.emplace(service_name, std::move(service_info)); // move is useful?
 
     std::cout << "register service: " << service_name << std::endl;
 }
 
-//设置监听listenfd + 循环监听
-void RpcProvider::Run(const std::string& ip, uint16_t port)
+// 设置监听listenfd + 循环监听
+void RpcProvider::Run(const std::string &ip, uint16_t port)
 {
     int listenfd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (listenfd < 0){
+    if (listenfd < 0)
+    {
         std::cerr << "create listen socket failed\n";
         return;
     }
@@ -94,7 +144,7 @@ void RpcProvider::Run(const std::string& ip, uint16_t port)
         return;
     }
 
-    if (::bind(listenfd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+    if (::bind(listenfd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0)
     {
         std::cerr << "bind failed\n";
         ::close(listenfd);
@@ -110,13 +160,13 @@ void RpcProvider::Run(const std::string& ip, uint16_t port)
 
     std::cout << "RpcProvider listen on " << ip << ":" << "port" << std::endl;
 
-    //循环监听
+    // 循环监听
     while (true)
     {
         struct sockaddr_in peer{};
         socklen_t len = sizeof(peer);
 
-        int connfd = ::accept(listenfd, reinterpret_cast<sockaddr*>(&peer), &len);
+        int connfd = ::accept(listenfd, reinterpret_cast<sockaddr *>(&peer), &len);
         if (connfd < 0)
         {
             continue;
@@ -128,26 +178,28 @@ void RpcProvider::Run(const std::string& ip, uint16_t port)
     }
 }
 
-//处理收到的request
+// 处理收到的request
 void RpcProvider::HandleClient(int connfd)
 {
     uint32_t net_header_size = 0;
-    if (!ReadN(connfd, &net_header_size, sizeof(net_header_size))){
+    if (!ReadN(connfd, &net_header_size, sizeof(net_header_size)))
+    {
         std::cerr << "ReadN header_size failed\n";
         return;
     }
 
     uint32_t header_size = ::ntohl(net_header_size);
-    //std::cout << header_size;
+    // std::cout << header_size;
 
     std::string header_str(header_size, '\0');
-    if (!ReadN(connfd, header_str.data(), header_size)){
+    if (!ReadN(connfd, header_str.data(), header_size))
+    {
         std::cerr << "ReadN header failed\n";
         return;
     }
 
-    //std::cout << header_str << "\n";
-    
+    // std::cout << header_str << "\n";
+
     rpc::RpcHeader header;
     if (!header.ParseFromString(header_str))
     {
@@ -160,36 +212,51 @@ void RpcProvider::HandleClient(int connfd)
     uint32_t args_size = header.args_size();
     std::cout << "rpc_provider: " << service_name << " " << method_name << "\n";
     std::string args(args_size, '\0');
-    if (!ReadN(connfd, args.data(), args.size())){
+    if (!ReadN(connfd, args.data(), args.size()))
+    {
         std::cerr << "read args failed\n";
         return;
     }
 
     auto service_it = services_.find(service_name);
-    if (service_it == services_.end()){
-        std::cerr << "service not found\n";
+    if (service_it == services_.end())
+    {
+        std::string error = "service not found" + service_name + '\n';
+        std::cerr << error;
+
+        SendRpcError(connfd, 1001, error);
         return;
     }
 
     auto method_it = service_it->second.methods.find(method_name);
-    if (method_it == service_it->second.methods.end()){
-        std::cerr << "method not found\n";
+    if (method_it == service_it->second.methods.end())
+    {
+        std::string error = "method not found" + method_name + "\n";
+        std::cerr << error;
+
+        SendRpcError(connfd, 1002, error);
         return;
     }
 
-    google::protobuf::Service* service = service_it->second.service;
-    const google::protobuf::MethodDescriptor* method_desc = method_it->second;
+    google::protobuf::Service *service = service_it->second.service;
+    const google::protobuf::MethodDescriptor *method_desc = method_it->second;
 
-    google::protobuf::Message* request = service->GetRequestPrototype(method_desc).New();
-    google::protobuf::Message* response = service->GetResponsePrototype(method_desc).New();
+    google::protobuf::Message *request = service->GetRequestPrototype(method_desc).New();
+    google::protobuf::Message *response = service->GetResponsePrototype(method_desc).New();
 
-    if (!request->ParseFromString(args)){
-        std::cerr << "request ParseFromString failed\n";
+    if (!request->ParseFromString(args))
+    {
+        std::string error = "parse request failed\n";
+        std::cerr << error;
+
+        SendRpcError(connfd, 1003, error);
+
         delete request;
         delete response;
         return;
     }
 
-    SendResponceClosure* done = new SendResponceClosure(connfd, request, response);
-    service->CallMethod(method_desc, nullptr, request, response, done);
+    SimpleRpcController* controller = new SimpleRpcController;
+    SendResponseClosure *done = new SendResponseClosure(connfd, controller, request, response);
+    service->CallMethod(method_desc, controller, request, response, done); // 真正调用Login方法
 }

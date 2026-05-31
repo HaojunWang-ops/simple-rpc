@@ -13,36 +13,58 @@ int main()
 
     demo::UserService_Stub stub(&channel);
 
-    demo::LoginRequest request;
-    request.set_name("haojun");
-    request.set_password("123456");
-
-    demo::LoginResponse response;
-
-    SimpleRpcController controller;
-
-    stub.Login(&controller, &request, &response, nullptr);
-
-    if (controller.Failed())
     {
-        std::cerr << "rpc failed: "
-                  << controller.ErrorText()
-                  << "\n";
-        return 1;
+        demo::LoginRequest request;
+        request.set_name("haojun");
+        request.set_password("123456");
+
+        demo::LoginResponse response;
+        SimpleRpcController controller;
+
+        stub.Login(&controller, &request, &response, nullptr);
+
+        if (controller.Failed())
+        {
+            std::cerr << "rpc failed: "
+                      << controller.ErrorText()
+                      << "\n";
+            return 1;
+        }
+        else
+        {
+            std::cout << "Login response:\n";
+            std::cout << "  code = " << response.code() << "\n";
+            std::cout << "  message = " << response.message() << "\n";
+            std::cout << "  success = " << std::boolalpha
+                      << response.success() << "\n";
+        }
     }
 
-    std::cout << "response.code = "
-              << response.code()
-              << "\n";
+    {
+        demo::RegisterRequest request;
+        request.set_name("haojun");
+        request.set_password("abcdef");
 
-    std::cout << "response.message = "
-              << response.message()
-              << "\n";
+        demo::RegisterResponse response;
+        SimpleRpcController controller;
 
-    std::cout << "response.success = "
-              << std::boolalpha
-              << response.success()
-              << "\n";
+        stub.Register(&controller, &request, &response, nullptr);
+
+        if (controller.Failed())
+        {
+            std::cerr << "Register rpc failed: "
+                      << controller.ErrorText()
+                      << "\n";
+        }
+        else
+        {
+            std::cout << "Register response:\n";
+            std::cout << "  code = " << response.code() << "\n";
+            std::cout << "  message = " << response.message() << "\n";
+            std::cout << "  success = " << std::boolalpha
+                      << response.success() << "\n";
+        }
+    }
 
     google::protobuf::ShutdownProtobufLibrary();
     return 0;

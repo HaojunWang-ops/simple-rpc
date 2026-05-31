@@ -7,3 +7,9 @@ message RpcHeader {
     string method_name = 2;
     uint32 args_size = 3;
 }
+
+message ResponseRpcHeader {
+    int32 error_code = 1;
+    string error_text = 2;
+    uint32 response_size = 3;
+}

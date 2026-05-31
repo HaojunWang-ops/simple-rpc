@@ -16,6 +16,15 @@ public:
         std::cout << "name = " << request->name() << "\n";
         std::cout << "password = " << request->password() << std::endl;
 
+        if (request->name().empty()){
+            controller->SetFailed("login name is empty");
+
+            if (done){
+                done->Run();
+            }
+            return;
+        }
+
         if (request->name() == "haojun" &&
             request->password() == "123456")
         {
@@ -35,9 +44,38 @@ public:
             done->Run();
         }
     }
+
+    void Register(google::protobuf::RpcController *controller,
+                  const demo::RegisterRequest *request,
+                  demo::RegisterResponse *response, 
+                  google::protobuf::Closure *done) override
+    {
+        std::cout << "UserServiceImpl::Register called\n";
+        std::cout << "name = " << request->name() << "\n";
+        std::cout << "password= " << request->password() << std::endl;
+
+        if (request->name().empty()){
+            controller->SetFailed("register name is empty");
+
+            if (done){
+                done->Run();
+            }
+
+            return;
+        }
+        
+        response->set_code(0);
+        response->set_message("register success");
+        response->set_success(true);
+
+        if (done){
+            done->Run();
+        }
+    }
 };
 
-int main(){
+int main()
+{
     GOOGLE_PROTOBUF_VERIFY_VERSION;
 
     UserServiceImpl user_service;
@@ -47,6 +85,6 @@ int main(){
     provider.Run("0.0.0.0", 8000);
 
     google::protobuf::ShutdownProtobufLibrary();
-    
+
     return 0;
 }

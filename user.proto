@@ -15,6 +15,17 @@ message LoginResponse {
     bool success = 3;
 }
 
+message RegisterRequest {
+    string name = 1;
+    string password = 2;
+}
+
+message RegisterResponse {
+    int32 code = 1;
+    string message = 2;
+    bool success = 3;
+}
 service UserService {
     rpc Login(LoginRequest) returns (LoginResponse);
+    rpc Register(RegisterRequest) returns (RegisterResponse);
 }

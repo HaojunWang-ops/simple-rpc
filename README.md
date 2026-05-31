@@ -167,6 +167,58 @@ demo::UserService_Stub stub(&channel);stub.Login(&controller, &request, &respons
                      │     Closure        │ (抽象，框架/用户实现)
                      │ + Run()            │
                      └────────────────────┘
+## 完整调用链
+
+```text
+服务端启动
+    ↓
+provider.NotifyService(&user_service)
+    ↓
+注册 demo.UserService.Login 的 MethodDescriptor
+    ↓
+provider.Run()
+    ↓
+等待客户端连接
+
+
+客户端：
+stub.Login(...)
+    ↓
+MyRpcChannel::CallMethod(...)
+    ↓
+发送 service_name = demo.UserService
+    ↓
+发送 method_name = Login
+    ↓
+发送 LoginRequest bytes
+
+
+服务端：
+HandleClient()
+    ↓
+解析 RpcHeader
+    ↓
+查 services_["demo.UserService"]
+    ↓
+查 methods["Login"]
+    ↓
+创建 LoginRequest / LoginResponse
+    ↓
+request->ParseFromString(args)
+    ↓
+service->CallMethod(method, ...)
+    ↓
+Protobuf 生成的 CallMethod 分发
+    ↓
+UserServiceImpl::Login(...)
+    ↓
+填充 response
+    ↓
+done->Run()
+    ↓
+发送 LoginResponse 给客户端
+```
+
 ## 编译运行
 
 安装依赖：
